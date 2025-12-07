@@ -2,9 +2,9 @@
    Tracker Hutang (Single-site Login)
    Storage: Firestore
 
-   Login logic:
-   - Admin password handled in index.html
-   - Debtor login: find debtor by scanning docs and verifying salted hash
+   NEW:
+   - requestToyyibPayBill(debtorId, amountRM, returnUrl)
+     Calls Cloud Function to create a ToyyibPay Bill securely.
 
    Koleksi:
    debtors/{debtorId}
@@ -22,8 +22,14 @@
      - provider: "manual" | "toyyibpay"
      - status: "success"
      - method?, reference?
-     - billCode?, externalRef?
+     - billCode?, refno?, order_id?
      - createdAt
+
+   debtors/{debtorId}/payment_requests/{reqId}
+     - amount
+     - status: "pending" | "created" | "success" | "fail"
+     - billCode?
+     - createdAt, updatedAt
 */
 
 const DebtDB = (() => {
@@ -106,7 +112,6 @@ const DebtDB = (() => {
     const debtorRef = _fs.collection("debtors").doc(debtorId);
     await debtorRef.set(doc);
 
-    // Rekod bayaran awal jika ada
     if (paid > 0) {
       const txnRef = debtorRef.collection("transactions").doc(uid());
       await txnRef.set({
@@ -240,6 +245,50 @@ const DebtDB = (() => {
     return null;
   }
 
+  // ---------- ToyyibPay: request bill via Cloud Function ----------
+  // You MUST update FUNCTION_REGION if you deploy to a different region.
+  const FUNCTION_REGION = "asia-southeast1";
+
+  function getProjectIdFromConfig() {
+    // firebase.app().options.projectId is available in compat SDK
+    try { return firebase.app().options.projectId; } catch { return ""; }
+  }
+
+  function getCreateBillFunctionUrl() {
+    const pid = getProjectIdFromConfig();
+    if (!pid) throw new Error("ProjectId tidak ditemui.");
+    return `https://${FUNCTION_REGION}-${pid}.cloudfunctions.net/createToyyibBill`;
+  }
+
+  async function requestToyyibPayBill(debtorId, amountRM, returnUrl) {
+    assertInit();
+    const amt = Math.max(0, Number(amountRM) || 0);
+    if (!amt) throw new Error("Amaun tidak sah.");
+
+    const url = getCreateBillFunctionUrl();
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        debtorId,
+        amount: amt,
+        returnUrl: returnUrl || ""
+      })
+    });
+
+    if (!res.ok) {
+      let txt = "";
+      try { txt = await res.text(); } catch {}
+      throw new Error(txt || "Gagal cipta bil ToyyibPay.");
+    }
+
+    const data = await res.json();
+    if (!data?.billCode || !data?.paymentUrl) {
+      throw new Error("Respon bil tidak lengkap.");
+    }
+    return data;
+  }
+
   // ---------- Stats ----------
   function computeStats(d) {
     const totalDebt = Number(d?.totalDebt) || 0;
@@ -265,6 +314,7 @@ const DebtDB = (() => {
     computeStats,
     verifyPasswordLocal,
     hashPassword,
-    findDebtorByPassword
+    findDebtorByPassword,
+    requestToyyibPayBill
   };
 })();
