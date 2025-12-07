@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tracker Hutang (Admin)</title>
+  <title>Tracker Hutang</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,7 +12,7 @@
 
   <style>
     html, body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    .glass { background: rgba(255,255,255,0.85); backdrop-filter: blur(10px); }
+    .glass { background: rgba(255,255,255,0.88); backdrop-filter: blur(10px); }
   </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-800">
@@ -46,6 +46,12 @@
       appId: "1:840792083486:web:6086e62521fd771063320f",
       measurementId: "G-R6WVPCJ4KT"
     };
+
+    // ===============================
+    // ADMIN PASSWORD (ANDA MINTA)
+    // ===============================
+    const ADMIN_PASSWORD = "hanis1234";
+    // Anda boleh tukar nanti. Untuk lebih secure, nanti kita boleh pindahkan semakan admin ke backend.
 
     // ===============================
     // Utils
@@ -95,12 +101,111 @@
     }
 
     // ===============================
-    // Admin UI
+    // Global state
     // ===============================
-    let searchQ = "";
+    let currentRole = null; // "admin" | "debtor"
+    let currentDebtor = null;
+
     let unsubDebtors = null;
     let unsubOne = null;
-    let currentDebtor = null;
+
+    // ===============================
+    // Login UI
+    // ===============================
+    function renderLogin() {
+      qs("app").innerHTML = `
+        <div class="max-w-xl mx-auto">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-lg">
+              <span class="text-xl font-extrabold">RM</span>
+            </div>
+            <div>
+              <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Tracker Hutang</h1>
+              <p class="text-sm text-slate-500">Satu sistem untuk Admin & Penghutang.</p>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mt-6">
+            <h2 class="text-lg font-bold">Log Masuk</h2>
+            <p class="text-xs text-slate-500 mb-4">
+              Masukkan kata laluan sahaja.
+              <span class="font-semibold">Admin</span> akan dibawa ke dashboard,
+              <span class="font-semibold">penghutang</span> akan dibawa ke rekod sendiri.
+            </p>
+
+            <div class="space-y-3">
+              <input id="loginPass" type="password"
+                class="w-full px-3 py-2 rounded-xl border border-slate-200"
+                placeholder="Kata laluan" />
+              <button id="btnLogin"
+                class="w-full px-4 py-2.5 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-800 shadow">
+                Log Masuk
+              </button>
+            </div>
+
+            <div id="loginErr"
+              class="hidden mt-3 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+              Kata laluan tidak sah.
+            </div>
+          </div>
+
+          <div class="mt-4 text-[11px] text-slate-500">
+            * Untuk login penghutang gaya “password sahaja”, sistem akan menyemak padanan dalam senarai penghutang.
+          </div>
+        </div>
+      `;
+
+      qs("btnLogin").addEventListener("click", handleLogin);
+      qs("loginPass").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleLogin();
+      });
+    }
+
+    async function handleLogin() {
+      const pass = qs("loginPass").value || "";
+      qs("loginErr").classList.add("hidden");
+
+      if (!pass.trim()) { toast("Sila masukkan kata laluan", "warn"); return; }
+
+      // Admin
+      if (pass === ADMIN_PASSWORD) {
+        currentRole = "admin";
+        toast("Login admin berjaya");
+        renderAdmin();
+        return;
+      }
+
+      // Debtor: scan
+      try {
+        const debtor = await DebtDB.findDebtorByPassword(pass, 300);
+        if (!debtor) {
+          qs("loginErr").classList.remove("hidden");
+          return;
+        }
+        currentRole = "debtor";
+        currentDebtor = debtor;
+        toast("Login penghutang berjaya");
+        renderDebtor(debtor.id);
+      } catch (e) {
+        toast("Gagal semak login", "err");
+        qs("loginErr").classList.remove("hidden");
+      }
+    }
+
+    function logout() {
+      currentRole = null;
+      currentDebtor = null;
+
+      if (unsubDebtors) { unsubDebtors(); unsubDebtors = null; }
+      if (unsubOne) { unsubOne(); unsubOne = null; }
+
+      renderLogin();
+    }
+
+    // ===============================
+    // ========== ADMIN VIEW ==========
+    // ===============================
+    let searchQ = "";
 
     function renderAdminShell() {
       qs("app").innerHTML = `
@@ -115,14 +220,13 @@
             </div>
           </div>
           <div class="flex gap-2">
-            <button id="btnRefresh"
+            <button id="btnLogout"
               class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-sm text-sm font-semibold">
-              Refresh
+              Log Keluar
             </button>
           </div>
         </div>
 
-        <!-- Global Stats -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <div class="glass rounded-2xl p-5 border border-slate-200 shadow-sm">
             <p class="text-xs text-slate-500 font-semibold">Bilangan Penghutang</p>
@@ -143,13 +247,11 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-          <!-- Left: Add form + Search -->
           <div class="lg:col-span-1 space-y-6">
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
               <h2 class="text-lg font-bold">Tambah Penghutang</h2>
               <p class="text-xs text-slate-500 mb-4">
-                Anda boleh isi <b>Jumlah Dah Bayar</b> untuk kes macam
-                <b>RM3000</b> hutang, baki awal <b>RM2700</b>.
+                Boleh isi <b>Jumlah Dah Bayar</b> untuk dapat baki awal yang tepat.
               </p>
 
               <div class="space-y-3">
@@ -162,14 +264,12 @@
                 <div>
                   <label class="text-xs font-semibold text-slate-600">No Telefon (optional)</label>
                   <input id="inPhone" type="text"
-                    class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200"
-                    placeholder="012-xxxxxxx" />
+                    class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200" />
                 </div>
                 <div>
                   <label class="text-xs font-semibold text-slate-600">Nota (optional)</label>
                   <input id="inNote" type="text"
-                    class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200"
-                    placeholder="Bayar ansuran" />
+                    class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200" />
                 </div>
                 <div>
                   <label class="text-xs font-semibold text-slate-600">Jumlah Hutang (RM)</label>
@@ -205,7 +305,6 @@
             </div>
           </div>
 
-          <!-- Right: List -->
           <div class="lg:col-span-2">
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm">
               <div class="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -330,12 +429,10 @@
         </div>
       `;
 
-      qs("btnRefresh").addEventListener("click", () => {
-        if (window.__lastDebtors) renderAdminData(window.__lastDebtors);
-      });
+      qs("btnLogout").addEventListener("click", logout);
     }
 
-    function debtorCard(d) {
+    function debtorCardAdmin(d) {
       const s = DebtDB.computeStats(d);
       const pct = Math.round(s.pct);
 
@@ -394,7 +491,6 @@
       const list = debtors || [];
       window.__lastDebtors = list;
 
-      // global stats
       const totalDebt = list.reduce((s,d)=>s+(Number(d.totalDebt)||0),0);
       const totalPaid = list.reduce((s,d)=>s+(Number(d.totalPaid)||0),0);
       const totalBal  = list.reduce((s,d)=>s+(Number(d.balance)||0),0);
@@ -404,7 +500,6 @@
       qs("statPaid").textContent = fmtRM(totalPaid);
       qs("statBalance").textContent = fmtRM(totalBal);
 
-      // filter
       let filtered = [...list];
       if (searchQ.trim()) {
         const q = searchQ.toLowerCase();
@@ -415,7 +510,6 @@
         );
       }
 
-      // sort by balance desc
       filtered.sort((a,b) => (Number(b.balance)||0) - (Number(a.balance)||0));
 
       qs("listCount").textContent = filtered.length;
@@ -423,7 +517,7 @@
       const listEl = qs("peopleList");
       const emptyEl = qs("emptyState");
 
-      listEl.innerHTML = filtered.map(debtorCard).join("");
+      listEl.innerHTML = filtered.map(debtorCardAdmin).join("");
       if (filtered.length === 0) emptyEl.classList.remove("hidden");
       else emptyEl.classList.add("hidden");
 
@@ -472,15 +566,11 @@
         if (window.__lastDebtors) renderAdminData(window.__lastDebtors);
       });
 
-      // close modal on backdrop click
       qs("modalBackdrop").addEventListener("click", (e) => {
         if (e.target === qs("modalBackdrop")) closeAdminModal();
       });
     }
 
-    // ===============================
-    // Modal
-    // ===============================
     function openAdminModal(debtorId) {
       if (unsubOne) unsubOne();
 
@@ -524,7 +614,6 @@
         badge.className = "inline-block mt-2 text-[10px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200";
       }
 
-      // Load transaction history
       const txns = await DebtDB.listTransactionsOnce(d.id, 100);
       qs("mTxnCount").textContent = `${txns.length} transaksi`;
 
@@ -555,7 +644,6 @@
         `).join("");
       }
 
-      // Buttons
       qs("btnCloseModal").onclick = closeAdminModal;
 
       qs("btnAddPayment").onclick = async () => {
@@ -570,9 +658,6 @@
           qs("mPayAmount").value = "";
           qs("mPayRef").value = "";
           toast("Bayaran direkod");
-          // reload history quickly
-          const txns2 = await DebtDB.listTransactionsOnce(d.id, 100);
-          qs("mTxnCount").textContent = `${txns2.length} transaksi`;
         } catch (e) {
           toast(e.message || "Gagal rekod bayaran", "err");
         }
@@ -589,9 +674,13 @@
         if (newTotalStr === null) return;
 
         const newTotal = Number(newTotalStr);
-        if (Number.isNaN(newTotal) || newTotal < 0) { toast("Jumlah tidak sah", "err"); return; }
+        if (Number.isNaN(newTotal) || newTotal < 0) {
+          toast("Jumlah tidak sah", "err"); return;
+        }
 
-        await DebtDB.updateDebtor(d.id, { name: newName, phone: newPhone, note: newNote, totalDebt: newTotal });
+        await DebtDB.updateDebtor(d.id, {
+          name: newName, phone: newPhone, note: newNote, totalDebt: newTotal
+        });
         toast("Maklumat dikemaskini");
       };
 
@@ -611,19 +700,160 @@
       };
     }
 
+    function renderAdmin() {
+      renderAdminShell();
+      bindAdminActions();
+      unsubDebtors = DebtDB.watchDebtors((list) => renderAdminData(list));
+    }
+
+    // ===============================
+    // ========== DEBTOR VIEW =========
+    // ===============================
+    let debtorUnsub = null;
+
+    function renderDebtorShell() {
+      qs("app").innerHTML = `
+        <div class="max-w-2xl mx-auto">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-lg">
+                <span class="text-xl font-extrabold">RM</span>
+              </div>
+              <div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Portal Penghutang</h1>
+                <p class="text-sm text-slate-500">Paparan rekod bayaran anda.</p>
+              </div>
+            </div>
+            <button id="btnLogout"
+              class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold">
+              Log Keluar
+            </button>
+          </div>
+
+          <div id="debtorCard"
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mt-6"></div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mt-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-bold">Transaction History</h3>
+              <span id="dTxnCount" class="text-xs text-slate-500">0 transaksi</span>
+            </div>
+            <div id="dTxnList" class="mt-3 space-y-2"></div>
+            <div id="dTxnEmpty" class="hidden mt-3">
+              <div class="rounded-2xl border border-dashed border-slate-200 p-5 text-center text-slate-500 text-sm">
+                Tiada transaksi lagi.
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      qs("btnLogout").addEventListener("click", logout);
+    }
+
+    function paintDebtorCard(d) {
+      const s = DebtDB.computeStats(d);
+      const pct = Math.round(s.pct);
+
+      qs("debtorCard").innerHTML = `
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-slate-500 font-semibold">Nama</div>
+            <div class="text-xl font-extrabold">${d.name || "Penghutang"}</div>
+            <div class="text-xs text-slate-500 mt-1">${d.note || "Tiada nota"}</div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] text-slate-500 font-semibold">BAKI</div>
+            <div class="text-2xl font-extrabold">${fmtRM(s.balance)}</div>
+            <span class="inline-block mt-1 text-[10px] px-2 py-1 rounded-full ${
+              s.isSettled ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                          : "bg-slate-100 text-slate-700 border border-slate-200"
+            } font-bold">
+              ${s.isSettled ? "SELESAI" : "BELUM SELESAI"}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+          <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <div class="text-[9px] text-slate-500 font-semibold">HUTANG</div>
+            <div class="text-sm font-bold">${fmtRM(s.totalDebt)}</div>
+          </div>
+          <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <div class="text-[9px] text-slate-500 font-semibold">BAYAR</div>
+            <div class="text-sm font-bold">${fmtRM(s.totalPaid)}</div>
+          </div>
+          <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <div class="text-[9px] text-slate-500 font-semibold">PROGRESS</div>
+            <div class="text-sm font-bold">${pct}%</div>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="flex justify-between text-[10px] font-semibold text-slate-500">
+            <span>Progress Bayaran</span>
+            <span>${pct}%</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-slate-100 overflow-hidden mt-1">
+            <div class="h-full bg-slate-900/80" style="width:${pct}%"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function paintDebtorTxns(debtorId) {
+      const txns = await DebtDB.listTransactionsOnce(debtorId, 50);
+      qs("dTxnCount").textContent = `${txns.length} transaksi`;
+
+      const listEl = qs("dTxnList");
+      const emptyEl = qs("dTxnEmpty");
+
+      if (txns.length === 0) {
+        listEl.innerHTML = "";
+        emptyEl.classList.remove("hidden");
+        return;
+      }
+      emptyEl.classList.add("hidden");
+
+      listEl.innerHTML = txns.map(p => `
+        <div class="p-3 rounded-xl border border-slate-200">
+          <div class="text-sm font-bold">${fmtRM(p.amount)}</div>
+          <div class="text-[10px] text-slate-500 font-semibold">
+            ${(p.provider || "manual").toUpperCase()}
+            ${p.method ? "• " + p.method : ""}
+            • ${formatDateShort(p.createdAt)}
+            ${p.reference ? "• " + p.reference : ""}
+            ${p.billCode ? "• " + p.billCode : ""}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderDebtor(debtorId) {
+      renderDebtorShell();
+
+      if (debtorUnsub) { debtorUnsub(); debtorUnsub = null; }
+
+      debtorUnsub = DebtDB.watchDebtor(debtorId, async (d) => {
+        if (!d) {
+          toast("Rekod tidak ditemui", "err");
+          logout();
+          return;
+        }
+        paintDebtorCard(d);
+        await paintDebtorTxns(debtorId);
+      });
+    }
+
     // ===============================
     // Boot
     // ===============================
-    renderAdminShell();
-    bindAdminActions();
-
-    unsubDebtors = DebtDB.watchDebtors((list) => renderAdminData(list));
+    renderLogin();
 
     window.addEventListener("beforeunload", () => {
       if (unsubDebtors) unsubDebtors();
       if (unsubOne) unsubOne();
+      if (debtorUnsub) debtorUnsub();
     });
-
   </script>
 </body>
 </html>
