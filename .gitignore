@@ -1,0 +1,15 @@
+# Node
+node_modules/
+functions/node_modules/
+
+# Env secrets
+functions/.env
+functions/.env.*
+
+# Firebase debug
+firebase-debug.log
+.firebaserc.bak
+
+# OS
+.DS_Store
+Thumbs.db
