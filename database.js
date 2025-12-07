@@ -1,6 +1,10 @@
 /* database.js
-   Tracker Hutang (Admin + Debtor-ready)
+   Tracker Hutang (Single-site Login)
    Storage: Firestore
+
+   Login logic:
+   - Admin password handled in index.html
+   - Debtor login: find debtor by scanning docs and verifying salted hash
 
    Koleksi:
    debtors/{debtorId}
@@ -102,7 +106,7 @@ const DebtDB = (() => {
     const debtorRef = _fs.collection("debtors").doc(debtorId);
     await debtorRef.set(doc);
 
-    // Jika ada bayaran awal, rekodkan sebagai transaksi "carry over"
+    // Rekod bayaran awal jika ada
     if (paid > 0) {
       const txnRef = debtorRef.collection("transactions").doc(uid());
       await txnRef.set({
@@ -163,10 +167,11 @@ const DebtDB = (() => {
 
   function watchDebtors(callback) {
     assertInit();
-    return _fs.collection("debtors").onSnapshot((qs) => {
-      const list = qs.docs.map(d => d.data());
-      callback(list);
-    });
+    return _fs.collection("debtors")
+      .onSnapshot((qs) => {
+        const list = qs.docs.map(d => d.data());
+        callback(list);
+      });
   }
 
   async function getDebtorOnce(debtorId) {
@@ -222,6 +227,19 @@ const DebtDB = (() => {
     return true;
   }
 
+  // ---------- Debtor login helper (scan) ----------
+  async function findDebtorByPassword(passwordInput, scanLimit = 200) {
+    assertInit();
+    const snap = await _fs.collection("debtors").limit(scanLimit).get();
+    const list = snap.docs.map(d => d.data());
+
+    for (const d of list) {
+      const ok = await verifyPasswordLocal(d, passwordInput);
+      if (ok) return d;
+    }
+    return null;
+  }
+
   // ---------- Stats ----------
   function computeStats(d) {
     const totalDebt = Number(d?.totalDebt) || 0;
@@ -231,13 +249,6 @@ const DebtDB = (() => {
     const isSettled = totalDebt > 0 && balance <= 0;
     const pct = totalDebt > 0 ? Math.max(0, Math.min(100, (totalPaid / totalDebt) * 100)) : 0;
     return { totalDebt, totalPaid, balance, isSettled, pct };
-  }
-
-  function buildDebtorLink(baseUrl, debtorId) {
-    const url = new URL(baseUrl);
-    url.searchParams.set("mode", "debtor");
-    url.searchParams.set("pid", debtorId);
-    return url.toString();
   }
 
   return {
@@ -252,8 +263,8 @@ const DebtDB = (() => {
     listTransactionsOnce,
     addManualPayment,
     computeStats,
-    buildDebtorLink,
     verifyPasswordLocal,
-    hashPassword
+    hashPassword,
+    findDebtorByPassword
   };
 })();
