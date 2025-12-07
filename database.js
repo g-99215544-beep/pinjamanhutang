@@ -250,7 +250,6 @@ const DebtDB = (() => {
   const FUNCTION_REGION = "asia-southeast1";
 
   function getProjectIdFromConfig() {
-    // firebase.app().options.projectId is available in compat SDK
     try { return firebase.app().options.projectId; } catch { return ""; }
   }
 
